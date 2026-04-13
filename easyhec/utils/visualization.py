@@ -23,6 +23,9 @@ def visualize_extrinsic_results(
     labels: List[str] = [],
     output_dir="results/",
     return_rgb: bool = False,
+    frame_pose: Optional[np.ndarray] = None,
+    frame_axis_length: Optional[float] = None,
+    frame_origin_radius: int = 6,
 ):
     """
     Visualizes a given list of extrinsic matrices and draws the mask cameras at those extrinsics would project on the original RGB images.
@@ -37,6 +40,9 @@ def visualize_extrinsic_results(
         masks (np.ndarray, shape (N, H, W)): If given, will also display an image showing the masks used for optimization on top of the original images.
         labels (List[str]): List of labels for each of the extrinsics
         output_dir (str): Directory to save the visualizations
+        frame_pose (np.ndarray, shape (4, 4)): Optional frame pose in the object/world coordinate system to draw on top of each image.
+        frame_axis_length (float): Optional axis length in meters for the visualized frame. If None, no frame is drawn.
+        frame_origin_radius (int): Pixel radius used when drawing the frame origin.
     """
     ### visualization code for the predicted extrinsic ###
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -70,16 +76,81 @@ def visualize_extrinsic_results(
             mask[link_mask > 0] = 1
         return mask
 
+    def project_points(camera_pose: np.ndarray, points_world: np.ndarray):
+        points_cam = (camera_pose[:3, :3] @ points_world.T).T + camera_pose[:3, 3]
+        valid = points_cam[:, 2] > 1e-6
+        pixels = np.full((len(points_world), 2), np.nan, dtype=np.float32)
+        if np.any(valid):
+            projected = (intrinsic @ points_cam[valid].T).T
+            pixels[valid] = projected[:, :2] / projected[:, 2:3]
+        return pixels, valid
+
+    def draw_coordinate_frame(image: np.ndarray, camera_pose: np.ndarray):
+        if frame_pose is None or frame_axis_length is None or frame_axis_length <= 0:
+            return image
+
+        origin = frame_pose[:3, 3]
+        rotation = frame_pose[:3, :3]
+        axis_points = np.stack(
+            [
+                origin,
+                origin + rotation[:, 0] * frame_axis_length,
+                origin + rotation[:, 1] * frame_axis_length,
+                origin + rotation[:, 2] * frame_axis_length,
+            ],
+            axis=0,
+        )
+        pixels, valid = project_points(camera_pose, axis_points)
+        if not valid[0]:
+            return image
+
+        origin_px = tuple(np.round(pixels[0]).astype(int))
+        axis_colors = [
+            (255, 0, 0),
+            (0, 255, 0),
+            (0, 0, 255),
+        ]
+        for axis_idx, color in enumerate(axis_colors, start=1):
+            if valid[axis_idx]:
+                endpoint_px = tuple(np.round(pixels[axis_idx]).astype(int))
+                cv2.arrowedLine(
+                    image,
+                    origin_px,
+                    endpoint_px,
+                    color=color,
+                    thickness=3,
+                    tipLength=0.15,
+                )
+        cv2.circle(
+            image,
+            origin_px,
+            radius=frame_origin_radius,
+            color=(255, 255, 255),
+            thickness=-1,
+        )
+        cv2.circle(
+            image,
+            origin_px,
+            radius=frame_origin_radius + 2,
+            color=(0, 0, 0),
+            thickness=1,
+        )
+        return image
+
     for i in tqdm(range(len(images))):
         overlaid_images = []
         for j in range(len(extrinsics)):
             if camera_mount_poses is not None:
-                mask = get_mask_from_camera_pose(extrinsics[j] @ camera_mount_poses[i])
+                camera_pose = extrinsics[j] @ camera_mount_poses[i]
             else:
-                mask = get_mask_from_camera_pose(extrinsics[j])
+                camera_pose = extrinsics[j]
+            mask = get_mask_from_camera_pose(camera_pose)
             mask = mask.cpu().numpy()
             overlaid_images.append(images[i].copy())
             overlaid_images[-1][mask > 0] = overlaid_images[-1][mask > 0] // 4
+            overlaid_images[-1] = draw_coordinate_frame(
+                overlaid_images[-1], camera_pose.detach().cpu().numpy()
+            )
 
         num_subplots = len(extrinsics) + 1 if masks is not None else len(extrinsics)
 

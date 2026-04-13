@@ -102,8 +102,9 @@ def main(args: RealPaperArgs):
 
     # the guess says we are at position xyz=[-0.4, 0.0, 0.4] and angle the camerea downwards by np.pi / 4 radians  or 45 degrees
     # note that this convention is more natural for robotics (follows the typical convention for ROS and various simulators), where +Z is moving up towards the sky, +Y is to the left, +X is forward
+    # initial_extrinsic_guess should be T^{paper}_{cam_ros}
     initial_extrinsic_guess[:3, :3] = euler2mat(0, np.pi / 4, 0)
-    initial_extrinsic_guess[:3, 3] = np.array([-0.4, 0.1, 0.4])
+    initial_extrinsic_guess[:3, 3] = np.array([-0.8, -0.5, 0.76])
     initial_extrinsic_guess = ros2opencv(initial_extrinsic_guess)
 
     print("Initial extrinsic guess", initial_extrinsic_guess)
@@ -180,6 +181,9 @@ def main(args: RealPaperArgs):
         masks=masks,
         labels=["Initial Extrinsic Guess", "Predicted Extrinsic"],
         output_dir=args.output_dir,
+        frame_pose=np.eye(4, dtype=np.float32),
+        frame_axis_length=min(paper_width, paper_height) * 0.3,
+        frame_origin_radius=6,
     )
     print(f"Visualizations saved to {args.output_dir}")
 

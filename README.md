@@ -19,36 +19,28 @@ Another example below shows it working for a mounted camera.
 
 ## Installation
 
-Install from pip
-```bash
-pip install easyhec
-pip install "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git@729261dc64c4241ea36efda84fbf532cc8b425b8"
-```
-
-Install from git (We highly recommend you create a conda/mamba environment to manage packages)
-
 ```bash
 git clone https://github.com/StoneT2000/simple-easyhec
-conda create -n easyhec "python==3.11"
+conda create -n simplehec "python==3.11"
+pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 pip install -e .
+# nvdiffrast
 pip install "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git@729261dc64c4241ea36efda84fbf532cc8b425b8"
+# sam2
+cd ../sam2
+pip install -e .
+cd ../simple-easyhec
 ```
 
-The code relies on Nvdiffrast which can sometimes be tricky to setup as it can have some dependencies that need to be installed outside of pip. If you have issues installing Nvdiffrast (which provides dockerized options) see their [documentation](https://nvlabs.github.io/nvdiffrast/) or use our google colab script.
-
-For those who don't want to manually segment their robot images you can use [SAM2](https://github.com/facebookresearch/sam2). Follow the installation instructions in that repo to set it up locally. Otherwise this repo provides a simple point annotation interface to annotate provided images with SAM2 to generate segmentation maps.
+> The code relies on Nvdiffrast and [SAM2](https://github.com/facebookresearch/sam2) which can sometimes be tricky to setup as it can have some dependencies that need to be installed outside of pip. If you have issues installing Nvdiffrast (which provides dockerized options) see their [documentation](https://nvlabs.github.io/nvdiffrast/) or use our google colab script.
 
 ## Usage
 
-We provide two real-world examples of this codebase. One with the low-cost [LeRobot SO100 Arm](#so100-arm), and another fun example with [letter/A sized paper](#paper) (e.g. A4) to calibrate real cameras. We further provide a [simulated example](#simulation) as well. While all these examples can be run with no additional code, for your own use-cases you are recommended to copy the example scripts and modify as needed. Scripts when copy-pasted should run with no python errors out of the box.
+> We provide some already pre-written scripts using EasyHec, but many real-world setups differ a lot. We recommend you to copy the code and modify as needed. In general you only really need to modify the initial extrinsic guess and how you get the real camera images (for eg other cameras or multi-camera setups).
 
-To get started make sure to install [SAM2](https://github.com/facebookresearch/sam2) which powers the image segmentation process. Install any packages for the real robot/cameras as necessary. If you don't have the hardware you can try [this package out in simulation](#simulation).
-
-We provide some already pre-written scripts using EasyHec, but many real-world setups differ a lot. We recommend you to copy the code and modify as needed. In general you only really need to modify the initial extrinsic guess and how you get the real camera images (for eg other cameras or multi-camera setups).
+As for output, `camera_extrinsic_opencv` -> $T^{cam_opencv}_{world}$; `camera_extrinsic_ros` -> $T^{world}_{cam_ros}$.
 
 ### Paper
-
-![](./assets/paper_optimization_progression.gif)
 
 [Script Code](./easyhec/examples/real/paper.py)
 
@@ -56,73 +48,43 @@ The script below will take one picture, ask you to annotate the paper to get a s
 
 ```bash
 pip install pyrealsense2 # install the intel realsense package
-python -m easyhec.examples.real.paper --paper-type a4 \
-  --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt 
+python -m easyhec.examples.real.paper \
+  --paper-type a4 \
+  --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml \
+  --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt \
+  --realsense_camera_serial_id 231522072820
 ```
 
+### xArm6
 
-### SO100 Arm
-
-![](./assets/so100_optimization_progression.gif)
-
-[Script Code](./easyhec/examples/real/so100.py)
-
-The script below will take a few pictures, ask you to annotate the robot to get a segmentation mask, then it optimizes for the camera extrinsics one shot. It will calibrate the camera extrinsics relative to the robot base. Results are saved to `results/so100/{robot_id}/{camera_id}`. Note that the robot-id is the same one you use to calibrate the robot initially with LeRobot.
+[Script Code](./easyhec/examples/real/xarm6.py)
 
 ```bash
-pip install pyrealsense2 # install the intel realsense package
-pip install lerobot[feetech] # install lerobot to control the arm
-python -m easyhec.examples.real.so100 \
-  --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt \
-  --early-stopping-steps 1000 \
-  --robot-id my_robot_id \
-  --realsense_camera_serial_id 146322070293
+python -m easyhec.examples.real.xarm6 \
+  --xarm-ip 192.168.1.212 \
+  --urdf-path easyhec/examples/real/robot_definitions/xarm6/xarm6_gripper.urdf \
+  --realsense-camera-serial-id 231522072820 \
+  --num_manual_samples 4 \
+  --model-cfg configs/sam2.1/sam2.1_hiera_l.yaml \
+  --checkpoint /media/sealab/data/xiaojx/sam2/checkpoints/sam2.1_hiera_large.pt \
 ```
 
-The LeRobot arms have some tuning caveats. For best results we recommend you follow the instructions printed by the help message (add `--help` to the script arguments). These primarily revolve around the robot calibration and how to fix it's sim2real gap offsets and initial extrinsic guess tuning.
+For eye-to-hand calibration, one practical difficulty is getting a reasonable initial extrinsic guess. In our xArm6 setup, a good workflow is to first use an A4 sheet of paper to gradually confirm the camera position, then transfer that paper-based result into the robot base frame as the initial guess for robot calibration.
 
-### Simulation
+#### Paper-Assisted Initialization
 
-[Script Code](./easyhec/examples/sim/maniskill.py)
+1. Place an A4 sheet flat on the table near the robot base.
+2. Run the paper calibration script and annotate the paper mask:
+3. Check the visualization in `results/paper` and move the paper if needed so the recovered paper frame is easy to interpret. This step is useful for gradually confirming whether the camera is roughly where you expect. ![](./assets/paper_calibration.png).
+4. Read the printed `ROS/SAPIEN/ManiSkill/Mujoco/Isaac` matrix from the paper calibration result. This gives a `Camera<-Paper` pose in the ROS-style convention used by this repo.
+5. Define how the xArm base frame relates to the paper frame. For example, in our setup we used:
 
-To test in simulation we provide an example through maniskill. The example generates 5 training synthetic images of the Franka/Panda robot with segmentation masks of the robot in random joint positions sampled around the initial joint position, and an initial extrinsic camera guess noisly sampled around the ground truth. By default 10 test images of the robot in different configurations are tested on and saved locally to the `results/` folder. This simulation also has raytracing for nicer renders which is disabled by default, turn it on by adding --shader rt
+`x_base = -y_paper`, `y_base = x_paper`, `z_base = z_paper`
 
-```bash
-pip install easyhec[sim-maniskill]
-# Franka arm, camera used here is a offhand 512x512 camera
-python -m easyhec.examples.sim.maniskill -e StackCube-v1 --samples 5
-```
+6. Convert the paper-calibrated rotation into the robot-base rotation using that axis mapping, and use the paper calibration translation as a starting point if the paper origin is already close to the robot base origin. If the paper is offset from the robot base, add that offset before using the pose in `xarm6.py`.
+7. Put the resulting `Camera<-Base` initial guess into `resolve_initial_extrinsic_guess()` in [easyhec/examples/real/xarm6.py](./easyhec/examples/real/xarm6.py), then run the xArm calibration script.
 
-You can also try out other robots and cameras that ManiSkill provides in other environments like the base camera for SO100
-
-
-```bash
-# SO100 arm, base_camera here is a 128x128 camera 
-python -m easyhec.examples.sim.maniskill -e SO100GraspCube-v1 --samples 5 \
-    --camera-name base_camera \
-    --initial-extrinsic-guess-rot-error 15 --initial-extrinsic-guess-pos-error 0.1
-```
-
-Wrist cameras are also possible but are harder to get working. The amount of initial extrinsic error must also be lower since the robot already takes up a large part of the image. If the robot is far away more error is possible to solve from. This is why a specific seed is specified for the script below (the seed determines the direction of error we generate for testing, in some directions its impossible because of occlusion).
-
-```bash
-python -m easyhec.examples.sim.maniskill -e StackCube-v1 --samples 5 --seed 2 \
-    --camera-name hand_camera \
-    --initial-extrinsic-guess-rot-error 5 --initial-extrinsic-guess-pos-error 0.01
-```
-
-Instead of using the ground truth segmentation masks of the robot you can also use SAM2 generated masks based on your own point based annotations to reflect what you might do with real world images without access to ground truth data. The script below turns that option on and opens a GUI on your display to let you annotate each generated sample.
-
-```bash
-python -m easyhec.examples.sim.maniskill -e StackCube-v1 --samples 5 \
-  --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt \
-  --no-use-ground-truth-segmentation
-```
-
-
-## Customization
-
-This repository is fairly minimal. The core optimization code is in `easyhec/optim` which uses a few 3D geometry related utilities in `easyhec/utils`. Feel free to copy those and modify as needed.
+This paper-assisted step is not the final calibration by itself. It is a convenient way to reduce the search space and make the robot calibration converge much more reliably, especially when the camera is mounted far from the robot or the default hand-written initial guess is too rough.
 
 ## Tuning Tips
 
@@ -150,5 +112,12 @@ If you find this code useful for your research, please use the following BibTeX 
   year    = {2020},
   volume  = {39},
   number  = {6}
+}
+@article{ravi2024sam2,
+  title={SAM 2: Segment Anything in Images and Videos},
+  author={Ravi, Nikhila and Gabeur, Valentin and Hu, Yuan-Ting and Hu, Ronghang and Ryali, Chaitanya and Ma, Tengyu and Khedr, Haitham and R{\"a}dle, Roman and Rolland, Chloe and Gustafson, Laura and Mintun, Eric and Pan, Junting and Alwala, Kalyan Vasudev and Carion, Nicolas and Wu, Chao-Yuan and Girshick, Ross and Doll{\'a}r, Piotr and Feichtenhofer, Christoph},
+  journal={arXiv preprint arXiv:2408.00714},
+  url={https://arxiv.org/abs/2408.00714},
+  year={2024}
 }
 ```
