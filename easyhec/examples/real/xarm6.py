@@ -399,18 +399,14 @@ def main(args: XArm6Args):
     output_root = Path(args.output_dir) / robot_name / "base_camera"
     output_root.mkdir(parents=True, exist_ok=True)
 
-    arm = create_xarm(args.xarm_ip)
-    pipeline, intrinsic = create_realsense_pipeline(
-        args.realsense_camera_serial_id,
-        args.camera_width,
-        args.camera_height,
-        args.camera_fps,
-    )
     initial_extrinsic_guess = resolve_initial_extrinsic_guess(args)
 
     link_poses_path = output_root.parent / "link_poses_dataset.npy"
     image_dataset_path = output_root.parent / "image_dataset.npy"
     mask_path = output_root / "mask.npy"
+    intrinsic_path = output_root / "camera_intrinsic.npy"
+    arm = None
+    pipeline = None
 
     with TemporaryDirectory(prefix="easyhec_xarm6_") as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
@@ -429,7 +425,28 @@ def main(args: XArm6Args):
                     mesh_link_names=mesh_link_names,
                 )
                 images = image_dataset["base_camera"]
+                if intrinsic_path.exists():
+                    print(f"Using previous camera intrinsics from {intrinsic_path}")
+                    intrinsic = np.load(intrinsic_path)
+                else:
+                    print(
+                        "Previous captures found, but camera_intrinsic.npy is missing. "
+                        "Connecting to the camera to read intrinsics."
+                    )
+                    pipeline, intrinsic = create_realsense_pipeline(
+                        args.realsense_camera_serial_id,
+                        args.camera_width,
+                        args.camera_height,
+                        args.camera_fps,
+                    )
             else:
+                arm = create_xarm(args.xarm_ip)
+                pipeline, intrinsic = create_realsense_pipeline(
+                    args.realsense_camera_serial_id,
+                    args.camera_width,
+                    args.camera_height,
+                    args.camera_fps,
+                )
                 link_poses_dataset, image_dataset = capture_manual_samples(
                     arm=arm,
                     pipeline=pipeline,
