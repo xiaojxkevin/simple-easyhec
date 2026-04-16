@@ -46,7 +46,7 @@ class XArm6Args(Args):
     """IP address of the xArm controller."""
 
     urdf_path: Optional[str] = None
-    """Path to the xArm6 (+ gripper) URDF used for forward kinematics."""
+    """Optional URDF path. If unset, choose the gripper/no-gripper URDF from use_gripper."""
 
     realsense_camera_serial_id: str = "none"
     """RealSense serial number. Uses the first device if set to 'none'."""
@@ -55,17 +55,15 @@ class XArm6Args(Args):
     camera_height: int = 720
     camera_fps: int = 30
 
-    motion_speed_rad_s: float = 0.4
-    motion_acc_rad_s2: float = 1.0
     settle_time_s: float = 1.0
 
     manual_capture: bool = True
-    """If True, capture the current arm pose after you manually reposition it."""
+    """Manual capture flow only. Set to True."""
 
     num_manual_samples: int = 8
     """Number of manually positioned samples to capture."""
 
-    use_gripper: bool = True
+    use_gripper: bool = False
     """If True, also commands the gripper and inserts its state into the URDF cfg."""
 
     gripper_open_position: int = 800
@@ -91,29 +89,6 @@ ARM_JOINT_NAMES = (
 )
 
 GRIPPER_JOINT_NAMES = ("drive_joint",)
-
-QPOS_SAMPLES = [
-    {
-        "arm": np.deg2rad(np.array([0, -25, -15, 35, 0, 35], dtype=np.float32)),
-        "gripper": "open",
-    },
-    {
-        "arm": np.deg2rad(np.array([25, -35, -20, 55, -10, 10], dtype=np.float32)),
-        "gripper": "closed",
-    },
-    {
-        "arm": np.deg2rad(np.array([-30, -20, -30, 70, 20, -25], dtype=np.float32)),
-        "gripper": "open",
-    },
-    {
-        "arm": np.deg2rad(np.array([15, -50, -5, 60, 35, 40], dtype=np.float32)),
-        "gripper": "closed",
-    },
-    {
-        "arm": np.deg2rad(np.array([-15, -30, 10, 45, -30, 0], dtype=np.float32)),
-        "gripper": "open",
-    },
-]
 
 
 def import_xarm_api():
@@ -220,18 +195,6 @@ def get_arm_joint_values_radians(arm) -> np.ndarray:
     if code != 0:
         raise RuntimeError(f"Failed to read xArm joint angles, error code={code}")
     return np.asarray(angles[: len(ARM_JOINT_NAMES)], dtype=np.float32)
-
-
-def move_arm_joints(arm, qpos: np.ndarray, speed: float, mvacc: float):
-    code = arm.set_servo_angle(
-        angle=qpos.tolist(),
-        is_radian=True,
-        speed=speed,
-        mvacc=mvacc,
-        wait=True,
-    )
-    if code != 0:
-        raise RuntimeError(f"Failed to move xArm joints, error code={code}")
 
 
 def command_gripper(arm, gripper_state: str, args: XArm6Args):
@@ -408,19 +371,30 @@ def resolve_initial_extrinsic_guess(args: XArm6Args) -> np.ndarray:
     return initial_extrinsic_guess
 
 
-def main(args: XArm6Args):
-    if args.urdf_path is None:
-        raise ValueError(
-            "Please provide --urdf-path pointing to your xArm6 + gripper URDF."
-        )
+def resolve_default_urdf_path(args: XArm6Args) -> Path:
+    robot_def_dir = Path(__file__).resolve().parent / "robot_definitions" / "xarm6"
+    urdf_name = "xarm6_gripper.urdf" if args.use_gripper else "xarm6_nogripper.urdf"
+    return robot_def_dir / urdf_name
 
+
+def main(args: XArm6Args):
     if len(ARM_JOINT_NAMES) != 6:
         raise ValueError("ARM_JOINT_NAMES must contain exactly 6 xArm6 joints.")
+
+    if not args.manual_capture:
+        raise ValueError(
+            "Automatic joint-pose capture has been removed. "
+            "Please run with manual_capture=True."
+        )
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    urdf_path = Path(args.urdf_path).expanduser().resolve()
+    urdf_path = (
+        Path(args.urdf_path).expanduser().resolve()
+        if args.urdf_path is not None
+        else resolve_default_urdf_path(args).resolve()
+    )
     robot_name = urdf_path.stem
     output_root = Path(args.output_dir) / robot_name / "base_camera"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -456,43 +430,14 @@ def main(args: XArm6Args):
                 )
                 images = image_dataset["base_camera"]
             else:
-                if args.manual_capture:
-                    link_poses_dataset, image_dataset = capture_manual_samples(
-                        arm=arm,
-                        pipeline=pipeline,
-                        robot_urdf=robot_urdf,
-                        mesh_link_names=mesh_link_names,
-                        meshes=meshes,
-                        args=args,
-                    )
-                else:
-                    image_dataset = defaultdict(list)
-                    link_poses_dataset = np.zeros((len(QPOS_SAMPLES), len(meshes), 4, 4), dtype=np.float32)
-
-                    print("Starting camera and warming it up...")
-                    warmup_and_read_rgb(pipeline, skip_frames=60)
-
-                    for i, sample in enumerate(QPOS_SAMPLES):
-                        print(f"Capturing sample {i + 1}/{len(QPOS_SAMPLES)}")
-                        move_arm_joints(
-                            arm,
-                            sample["arm"],
-                            speed=args.motion_speed_rad_s,
-                            mvacc=args.motion_acc_rad_s2,
-                        )
-                        command_gripper(arm, sample["gripper"], args)
-                        time.sleep(args.settle_time_s)
-
-                        arm_qpos = get_arm_joint_values_radians(arm)
-                        image = warmup_and_read_rgb(pipeline, skip_frames=3)
-                        image_dataset["base_camera"].append(image)
-
-                        cfg = build_robot_cfg(robot_urdf, arm_qpos, sample["gripper"], args)
-                        link_poses = robot_urdf.link_fk(cfg=cfg, use_names=True)
-                        for link_idx, link_name in enumerate(mesh_link_names):
-                            link_poses_dataset[i, link_idx] = link_poses[link_name]
-
-                    image_dataset["base_camera"] = np.stack(image_dataset["base_camera"])
+                link_poses_dataset, image_dataset = capture_manual_samples(
+                    arm=arm,
+                    pipeline=pipeline,
+                    robot_urdf=robot_urdf,
+                    mesh_link_names=mesh_link_names,
+                    meshes=meshes,
+                    args=args,
+                )
 
                 images = image_dataset["base_camera"]
                 np.save(link_poses_path, link_poses_dataset)

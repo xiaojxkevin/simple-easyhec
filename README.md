@@ -38,7 +38,7 @@ cd ../simple-easyhec
 
 > We provide some already pre-written scripts using EasyHec, but many real-world setups differ a lot. We recommend you to copy the code and modify as needed. In general you only really need to modify the initial extrinsic guess and how you get the real camera images (for eg other cameras or multi-camera setups).
 
-As for output, `camera_extrinsic_opencv` -> $T^{cam_opencv}_{world}$; `camera_extrinsic_ros` -> $T^{world}_{cam_ros}$.
+As for output, `camera_extrinsic_opencv` -> $T^{cam-opencv}_{world}$; `camera_extrinsic_ros` -> $T^{world}_{cam-ros}$.
 
 ### Paper
 
@@ -62,12 +62,15 @@ python -m easyhec.examples.real.paper \
 ```bash
 python -m easyhec.examples.real.xarm6 \
   --xarm-ip 192.168.1.212 \
-  --urdf-path easyhec/examples/real/robot_definitions/xarm6/xarm6_gripper.urdf \
   --realsense-camera-serial-id 231522072820 \
   --num_manual_samples 4 \
   --model-cfg configs/sam2.1/sam2.1_hiera_l.yaml \
   --checkpoint /media/sealab/data/xiaojx/sam2/checkpoints/sam2.1_hiera_large.pt
 ```
+
+By default, this script uses manual capture only: you move the robot yourself, then press Enter to record the current pose and image. It also defaults to `use_gripper=False`, in which case it will automatically use `easyhec/examples/real/robot_definitions/xarm6/xarm6_nogripper.urdf`.
+
+If you want to calibrate with the gripper included, enable `--use-gripper True`. In that case, if `--urdf-path` is not provided, the script will automatically use `easyhec/examples/real/robot_definitions/xarm6/xarm6_gripper.urdf`.
 
 For eye-to-hand calibration, one practical difficulty is getting a reasonable initial extrinsic guess. In our xArm6 setup, a good workflow is to first use an A4 sheet of paper to gradually confirm the camera position, then transfer that paper-based result into the robot base frame as the initial guess for robot calibration.
 
