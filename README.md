@@ -48,11 +48,21 @@ The script below will take one picture, ask you to annotate the paper to get a s
 
 ```bash
 pip install pyrealsense2 # install the intel realsense package
+
 python -m easyhec.examples.real.paper \
   --paper-type a4 \
   --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml \
   --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt \
   --realsense_camera_serial_id 231522072820
+
+python -m easyhec.examples.real.paper \
+  --camera-type zed \
+  --zed-camera-resolution HD720 \
+  --camera-fps 30 \
+  --paper-type a4 \
+  --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml \
+  --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt
+
 ```
 
 ### xArm6
@@ -88,6 +98,37 @@ For eye-to-hand calibration, one practical difficulty is getting a reasonable in
 7. Put the resulting `Camera<-Base` initial guess into `resolve_initial_extrinsic_guess()` in [easyhec/examples/real/xarm6.py](./easyhec/examples/real/xarm6.py), then run the xArm calibration script.
 
 This paper-assisted step is not the final calibration by itself. It is a convenient way to reduce the search space and make the robot calibration converge much more reliably, especially when the camera is mounted far from the robot or the default hand-written initial guess is too rough.
+
+### Piper + ZED
+
+[Script Code](./easyhec/examples/real/piper.py)
+
+This script calibrates an external ZED camera against the Piper base frame. It uses the ZED left RGB stream and reads live Piper joint feedback through `piper_sdk` while you manually drag the robot to each calibration pose.
+
+Install the Piper and ZED Python dependencies inside the `simplehec` environment:
+
+```bash
+pip install piper_sdk python-can
+python /usr/local/zed/get_python_api.py
+```
+
+You can refer to [cmds](./cmds/piper_sdk) to config piper can ports.
+
+Then run manual capture calibration:
+
+```bash
+python -m easyhec.examples.real.piper \
+  --can-name can_right_slave \
+  --camera-resolution HD720 \
+  --camera-fps 30 \
+  --num-manual-samples 4 \
+  --model-cfg ../sam2/configs/sam2.1/sam2.1_hiera_l.yaml \
+  --checkpoint ../sam2/checkpoints/sam2.1_hiera_large.pt
+```
+
+The script does not command robot motion. Put Piper in teaching/manual mode, move it to a visible pose, wait until it is stationary, and press Enter when prompted. Results are saved under `results/piper/piper_description_v100_camera/base_camera`.
+
+If you only want to retry segmentation/optimization after collecting data, rerun with `--use-previous-captures True`. If your CAN feedback path requires the SDK enable helper, add `--allow-mode-switch True`.
 
 ## Tuning Tips
 

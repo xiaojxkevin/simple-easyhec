@@ -137,6 +137,15 @@ def visualize_extrinsic_results(
         )
         return image
 
+    def overlay_mask(image: np.ndarray, mask: np.ndarray):
+        output = image.copy()
+        mask_pixels = mask > 0
+        pink = np.array([255, 64, 192], dtype=np.float32)
+        output[mask_pixels] = (
+            output[mask_pixels].astype(np.float32) * 0.45 + pink * 0.55
+        ).astype(np.uint8)
+        return output
+
     for i in tqdm(range(len(images))):
         overlaid_images = []
         for j in range(len(extrinsics)):
@@ -146,8 +155,7 @@ def visualize_extrinsic_results(
                 camera_pose = extrinsics[j]
             mask = get_mask_from_camera_pose(camera_pose)
             mask = mask.cpu().numpy()
-            overlaid_images.append(images[i].copy())
-            overlaid_images[-1][mask > 0] = overlaid_images[-1][mask > 0] // 4
+            overlaid_images.append(overlay_mask(images[i], mask))
             overlaid_images[-1] = draw_coordinate_frame(
                 overlaid_images[-1], camera_pose.detach().cpu().numpy()
             )
@@ -164,8 +172,7 @@ def visualize_extrinsic_results(
         
         if masks is not None:
             ax = fig.add_subplot(1, num_subplots, num_subplots)
-            reference_mask = images[i].copy()
-            reference_mask[masks[i] > 0] = reference_mask[masks[i] > 0] // 4
+            reference_mask = overlay_mask(images[i], masks[i])
             ax.imshow(reference_mask)
             ax.axis("off")
             ax.set_title("Masks")
