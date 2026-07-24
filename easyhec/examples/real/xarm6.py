@@ -16,7 +16,7 @@ from easyhec.examples.real.base import Args
 from easyhec.optim.optimize import optimize
 from easyhec.segmentation.interactive import InteractiveSegmentation
 from easyhec.utils import visualization
-from easyhec.utils.camera_conversions import opencv2ros, ros2opencv
+from easyhec.utils.camera_conversions import opencv2ros
 from easyhec.utils.utils_3d import merge_meshes
 
 
@@ -336,21 +336,29 @@ def align_loaded_link_poses_dataset(
 
 
 def resolve_initial_extrinsic_guess(args: XArm6Args) -> np.ndarray:
-    """Return the initial guess in OpenCV convention expected by optimize()."""
-    # Assumption from the paper marker setup:
-    #   x_base = -y_paper, y_base = x_paper, z_base = z_paper
-    # Start from the paper-calibrated Camera<-Paper pose, then convert it into
-    # Camera<-Base using the assumed Paper->Base axis mapping.
-    paper_calibrated_extrinsic_ros = np.array(
-        [
-            [0.88711198, -0.30247952, 0.34862352, -0.89565728],
-            [0.2727517, 0.95288682, 0.1327145, -0.60423803],
-            [-0.37234208, -0.02264498, 0.92781921, 0.45554754],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-    paper_to_base_rotation = np.array(
+    """Return the initial guess in OpenCV convention expected by optimize().
+
+    The initial guess is built from two pieces:
+
+        T^{cam}_{paper}  (paper calibration, loaded from paper.py output)
+        T^{paper}_{base} (manually defined paper→base transform)
+
+    then:  T^{cam}_{base} = T^{cam}_{paper} @ T^{paper}_{base}
+
+    T^{paper}_{base} is a world-to-world transform and therefore independent
+    of camera convention.
+    """
+    # ---- T^{cam}_{paper} (OpenCV convention), from paper calibration ----
+    paper_calib_path = Path("results/paper/camera_extrinsic_opencv.npy")
+    A = np.load(paper_calib_path).astype(np.float32)
+    if A.shape == (3, 4):
+        A = np.vstack([A, [[0.0, 0.0, 0.0, 1.0]]]).astype(np.float32)
+
+    # ---- T^{paper}_{base} (world-to-world, no camera convention) ----
+    # TODO: fill in the correct paper→base transform for your setup.
+    #   Rotation: how the base axes are expressed in the paper frame.
+    #   Translation: base origin in the paper frame (meters).
+    R_paper_from_base = np.array(
         [
             [0.0, -1.0, 0.0],
             [1.0, 0.0, 0.0],
@@ -358,16 +366,17 @@ def resolve_initial_extrinsic_guess(args: XArm6Args) -> np.ndarray:
         ],
         dtype=np.float32,
     )
-    initial_extrinsic_guess_ros = np.eye(4, dtype=np.float32)
-    initial_extrinsic_guess_ros[:3, :3] = (
-        paper_to_base_rotation @ paper_calibrated_extrinsic_ros[:3, :3]
-    )
-    initial_extrinsic_guess_ros[:3, 3] = paper_to_base_rotation @ paper_calibrated_extrinsic_ros[:3, 3]
-    initial_extrinsic_guess = ros2opencv(initial_extrinsic_guess_ros)
+    B = np.eye(4, dtype=np.float32)
+    B[:3, :3] = R_paper_from_base
+    B[:3, 3] = [0.0, -0.2, 0.0]  # TODO: translation (m)
+
+    # ---- T^{cam}_{base} = T^{cam}_{paper} @ T^{paper}_{base} ----
+    initial_extrinsic_guess = A @ B
+
     print("Initial extrinsic guess from paper calibration + paper/base axis assumption")
-    print(f"Camera<-Paper (ROS):\n{repr(paper_calibrated_extrinsic_ros)}")
-    print(f"Camera<-Base (ROS):\n{repr(initial_extrinsic_guess_ros)}")
-    print(f"Camera<-Base (OpenCV):\n{repr(initial_extrinsic_guess)}")
+    print(f"T^{{cam}}_{{paper}} (OpenCV):\n{repr(A)}")
+    print(f"T^{{paper}}_{{base}}:\n{repr(B)}")
+    print(f"T^{{cam}}_{{base}} = T^{{cam}}_{{paper}} @ T^{{paper}}_{{base}} (OpenCV):\n{repr(initial_extrinsic_guess)}")
     return initial_extrinsic_guess
 
 
@@ -498,8 +507,8 @@ def main(args: XArm6Args):
             predicted_camera_extrinsic_ros = opencv2ros(predicted_camera_extrinsic_opencv)
 
             print("Predicted camera extrinsic")
-            print(f"OpenCV:\n{repr(predicted_camera_extrinsic_opencv)}")
-            print(f"ROS/SAPIEN/ManiSkill/Mujoco/Isaac:\n{repr(predicted_camera_extrinsic_ros)}")
+            print(f"T^{{cam}}_{{base}} (OpenCV):\n{repr(predicted_camera_extrinsic_opencv)}")
+            print(f"T^{{base}}_{{cam}} (ROS/SAPIEN/ManiSkill/Mujoco/Isaac):\n{repr(predicted_camera_extrinsic_ros)}")
 
             np.save(output_root / "camera_extrinsic_opencv.npy", predicted_camera_extrinsic_opencv)
             np.save(output_root / "camera_extrinsic_ros.npy", predicted_camera_extrinsic_ros)

@@ -210,21 +210,21 @@ def main(args: RealPaperArgs):
     ### Make an initial guess for the extrinsic ###
     initial_extrinsic_guess = np.eye(4)
 
-    # ZED/OpenCV optical convention:
+    # OpenCV optical convention:
     #   +X camera-right, +Y image-down, +Z forward along the optical axis.
     # The paper frame is centered on the paper, with +Z pointing up from the
     # tabletop. For the current ego-view setup, the paper center is about 20cm
     # to the right of the ZED optical center and about 70cm away along the view
-    # direction. This value is already T^{cam-opencv}_{paper/world}.
+    # direction. This initial guess is T^{cam}_{paper} in OpenCV convention.
     initial_extrinsic_guess[:3, :3] = np.array(
         [
-            [1.0, 0.0, 0.0],
-            [0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0],
             [0.0, 0.0, -1.0],
+            [-1.0, 0.0, 0.0],
         ],
         dtype=np.float32,
     )
-    initial_extrinsic_guess[:3, 3] = np.array([0.20, 0.08, 0.70], dtype=np.float32)
+    initial_extrinsic_guess[:3, 3] = np.array([-0.20, 0.2, 0.70], dtype=np.float32)
 
     print("Initial extrinsic guess", initial_extrinsic_guess)
 

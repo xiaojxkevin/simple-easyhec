@@ -10,12 +10,6 @@ We also provide some real/simulated examples that calibrate with a robot
 
 ![](./assets/so100_optimization_progression.gif)
 
-![](./assets/sim_example.png)
-
-Another example below shows it working for a mounted camera.
-
-![](./assets/sim_example_mounted_camera.png)
-
 
 ## Installation
 
@@ -38,7 +32,29 @@ cd ../simple-easyhec
 
 > We provide some already pre-written scripts using EasyHec, but many real-world setups differ a lot. We recommend you to copy the code and modify as needed. In general you only really need to modify the initial extrinsic guess and how you get the real camera images (for eg other cameras or multi-camera setups).
 
-As for output, `camera_extrinsic_opencv` -> $T^{cam-opencv}_{world}$; `camera_extrinsic_ros` -> $T^{world}_{cam-ros}$.
+### Output Files
+
+Each calibration script saves the following `.npy` files under the output directory:
+
+### Notation
+
+All transformation matrices use the convention:
+
+$$P^A = T^A_B \cdot P^B$$
+
+where $T^A_B$ transforms a point from frame $B$ to frame $A$.
+
+| File | Convention | Symbol | Meaning |
+|------|-----------|--------|---------|
+| `camera_extrinsic_opencv.npy` | OpenCV | $T^{cam}_{world}$ | Transforms a point from world to camera: $P^{cam} = T^{cam}_{world} \cdot P^{world}$. OpenCV optical axes: +X right, +Y down, +Z forward. |
+| `camera_extrinsic_ros.npy` | ROS | $T^{world}_{cam}$ | Camera pose in world (inverse of OpenCV extrinsic): $P^{world} = T^{world}_{cam} \cdot P^{cam}$. ROS optical axes: +X forward, +Y left, +Z up. |
+| `camera_intrinsic.npy` | OpenCV | $K$ | 3×3 intrinsic matrix: `[[fx, 0, cx], [0, fy, cy], [0, 0, 1]]`. |
+
+Both extrinsic matrices are 4×4 homogeneous: `[[R, t], [0, 0, 0, 1]]`.
+
+**For `paper.py`**: world = paper frame (origin at paper center, +Z upward, X/Y in paper plane).
+
+**For robot scripts (xarm6, piper, etc.)**: world = robot base frame.
 
 ### Paper
 
@@ -71,7 +87,7 @@ python -m easyhec.examples.real.paper \
 
 ```bash
 python -m easyhec.examples.real.xarm6 \
-  --xarm-ip 192.168.1.212 \
+  --xarm-ip 192.168.2.202 \
   --realsense-camera-serial-id 231522072820 \
   --num_manual_samples 4 \
   --model-cfg configs/sam2.1/sam2.1_hiera_l.yaml \
@@ -88,14 +104,16 @@ For eye-to-hand calibration, one practical difficulty is getting a reasonable in
 
 1. Place an A4 sheet flat on the table near the robot base.
 2. Run the paper calibration script and annotate the paper mask:
-3. Check the visualization in `results/paper` and move the paper if needed so the recovered paper frame is easy to interpret. This step is useful for gradually confirming whether the camera is roughly where you expect. ![](./assets/paper_calibration.png).
-4. Read the printed `ROS/SAPIEN/ManiSkill/Mujoco/Isaac` matrix from the paper calibration result. This gives a `Camera<-Paper` pose in the ROS-style convention used by this repo.
-5. Define how the xArm base frame relates to the paper frame. For example, in our setup we used:
-
-`x_base = -y_paper`, `y_base = x_paper`, `z_base = z_paper`
-
-6. Convert the paper-calibrated rotation into the robot-base rotation using that axis mapping, and use the paper calibration translation as a starting point if the paper origin is already close to the robot base origin. If the paper is offset from the robot base, add that offset before using the pose in `xarm6.py`.
-7. Put the resulting `Camera<-Base` initial guess into `resolve_initial_extrinsic_guess()` in [easyhec/examples/real/xarm6.py](./easyhec/examples/real/xarm6.py), then run the xArm calibration script.
+   ```bash
+   python -m easyhec.examples.real.paper --paper-type a4 ...
+   ```
+3. Check the visualization in `results/paper/0.png` to confirm the recovered paper frame is correct.
+   ![](./assets/paper_calibration.png)
+4. The paper calibration saves `camera_extrinsic_opencv.npy` ($T^{cam}_{paper}$). The script `xarm6.py`'s `resolve_initial_extrinsic_guess()` already loads this file via `np.load`.
+5. Define the paper→base transform by editing the $T^{paper}_{base}$ matrix in `resolve_initial_extrinsic_guess()`:
+   - **Rotation**: how the robot base axes relate to the paper axes. Since both Z axes point up (perpendicular to the table), the rotation is primarily a yaw angle θ around Z.
+   - **Translation**: the offset from the paper center to the robot base origin, measured in the paper frame (meters).
+6. The function computes $T^{cam}_{base} = T^{cam}_{paper} \cdot T^{paper}_{base}$ as the initial guess, then runs the xArm calibration.
 
 This paper-assisted step is not the final calibration by itself. It is a convenient way to reduce the search space and make the robot calibration converge much more reliably, especially when the camera is mounted far from the robot or the default hand-written initial guess is too rough.
 
