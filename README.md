@@ -4,11 +4,11 @@
 
 > Below shows the progression of the optimization of the extrinsic prediction. The first image shows the bad initial guess, the second image shows the predicted extrinsics, the third image shows the segmentation masks (generated with Segment Anything Model 2). The shaded mask in the first two images represent where the renderer would render the object (the paper) at the given extrinsics.
 
-![](./assets/paper_optimization_progression.gif)
+> ![](./assets/paper_optimization_progression.gif)
 
-We also provide some real/simulated examples that calibrate with a robot
+> We also provide some real/simulated examples that calibrate with a robot
 
-![](./assets/so100_optimization_progression.gif)
+> ![](./assets/so100_optimization_progression.gif)
 
 
 ## Installation
@@ -21,7 +21,7 @@ pip install -e .
 # nvdiffrast
 pip install "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git@729261dc64c4241ea36efda84fbf532cc8b425b8"
 # sam2
-cd ../sam2
+cd ../sam2 # git clone https://github.com/facebookresearch/sam2
 pip install -e .
 cd ../simple-easyhec
 ```
